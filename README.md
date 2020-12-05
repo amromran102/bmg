@@ -99,3 +99,127 @@ Then, execute mongorestore on the container to restore database
 $ docker exec -it <CONTAINER_NAME> <CMD>
 $ docker exec -it bmg_db mongorestore data/db/userslist/*.bson
 ```
+# Docker Swarm Orchasteration (Deployment/Replicas)
+
+## Setup multi-node swarm cluster
+To enable Fault Tolerance it is recommended to operate with 3 manager nodes.
+
+Docker uses the RAFT consensus algorithm for leader selection: if you have three managers, one manager can fail, and the remaining two represent a majority, which can decide which one of the remaining managers will be elected as a leader.
+
+- Intialize Docker Engine in Swarm mode, the first node is selected as a leader.
+```
+$ docker swarm init
+```
+- Add other manager nodes to the swarm
+```
+$ docker swarm join-token manager
+
+OUTPUT: docker swarm join --token SWMTKN-1-3xee4my7akl42ipp8tbcgrgbq23mdo98rqo12t7cg5b2tdzw1v-5cyapu5hco0exmejnahldbutv 192.168.0.23:2377
+```
+- Issue the previous command from the OUTPUT windowo on the other 2 nodes
+
+**Check the status of swarm cluster, 3 manager nodes are available with fault tolerance enable for failover scenarios.**
+```
+$ docker node ls
+
+ID                            HOSTNAME            STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+v8rjz66z0cn42p430cb8nzjmk *   node1               Ready               Active              Leader              19.03.11
+zkcolxgkjdh2vxs7a52kyam25     node2               Ready               Active              Reachable           19.03.11
+y4ctoa23mrdeqhvsdxxxski17     node3               Ready               Active              Reachable           19.03.11
+```
+
+## Deploy a stack to the swarm
+When running Docker Engine in swarm mode, you can use docker stack deploy to deploy a complete application stack to the swarm.
+
+---
+**NOTE**:
+If you’ve already got a multi-node swarm running, keep in mind that all docker stack and docker service commands must be run from a manager node.
+
+---
+
+### Set up a Docker registry
+Because a swarm consists of multiple Docker Engines, a registry is required to distribute images to all of them
+```
+$ docker service create --name registry --publish published=5000,target=5000 registry:2
+```
+
+- Check the registry service is deployed
+```
+$ docker service ls
+
+ID                  NAME                 MODE                REPLICAS            IMAGE                              PORTS
+kuzplg4y5i89        registry             replicated          1/1                 registry:2                         *:5000->5000/tcp
+```
+
+### Push the generated image to the registry
+To distribute the web app’s image across the swarm, it needs to be pushed to the registry you set up earlier. With Compose, this is very simple:
+```
+$ docker-compose push
+```
+The stack is now ready to be deployed.
+
+---
+**NOTE**:
+This step assumes you have previously built docker images from the dockercompose file.
+
+---
+
+## Deploy the stack to the swarm
+
+- Create the stack with docker stack deploy:
+```
+$ docker stack deploy --compose-file docker-compose.yml stack_bmg
+
+Creating network stack_bmg_default
+Creating service stack_bmg_angular
+Creating service stack_bmg_express
+Creating service stack_bmg_database
+```
+
+- Check that it’s running with docker stack services:
+```
+$ docker stack services stack_bmg
+
+ID                  NAME                 MODE                REPLICAS            IMAGE                                PORTS
+dmqa390e3mcw        stack_bmg_express    replicated          1/1                 127.0.0.1:5000/bmg_backend:latest    *:3000->3000/tcp
+pbpiyggkxd2i        stack_bmg_angular    replicated          1/1                 127.0.0.1:5000/bmg_frontend:latest   *:4200->4200/tcp
+w3lyorx2523o        stack_bmg_database   replicated          1/1                 mongo:latest                         *:27017->27017/tcp
+```
+
+## Scale Replicas (In/Out Scaling)
+
+Scale out containers running on multi-node docker swarm cluster
+
+- Scale out replicas with docker service scale:
+```
+$ docker service scale SERVICE=REPLICAS
+$ docker service scale stack_bmg_express=2
+$ docker service scale stack_bmg_angular=3
+```
+
+- Check that service replicas is scaled out:
+```
+$ docker service ls
+
+ID                  NAME                 MODE                REPLICAS            IMAGE                                PORTS
+pbpiyggkxd2i        stack_bmg_angular    replicated          3/3                 127.0.0.1:5000/bmg_frontend:latest   *:4200->4200/tcp
+w3lyorx2523o        stack_bmg_database   replicated          1/1                 mongo:latest                         *:27017->27017/tcp
+dmqa390e3mcw        stack_bmg_express    replicated          2/2                 127.0.0.1:5000/bmg_backend:latest    *:3000->3000/tcp
+```
+
+## Clean up resources
+
+Bring the stack down:
+```
+$ docker stack rm stack_bmg
+```
+
+Bring the registry down:
+```
+$ docker service rm registry
+```
+
+Bring Docker Engine out of swarm mode:
+```
+$ docker swarm leave --force
+```

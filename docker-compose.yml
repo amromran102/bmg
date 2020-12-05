@@ -3,6 +3,7 @@ version: '3' # specify docker-compose version
 # Define the services/containers to be run
 services:
   angular: # name of the frontend service
+    image: 127.0.0.1:5000/bmg_frontend
     build: crud-angular # specify the directory of the Dockerfile
     container_name: bmg_frontend
     ports:
@@ -11,6 +12,7 @@ services:
       - ./crud-angular:/app # this will enable changes made to the angular app reflect in the container
 
   express: #name of the backend service
+    image: 127.0.0.1:5000/bmg_backend
     build: crud-backend # specify the directory of the Dockerfile
     container_name: bmg_backend
     ports:
